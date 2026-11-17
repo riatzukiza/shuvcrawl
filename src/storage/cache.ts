@@ -1,5 +1,6 @@
-import { readFile, writeFile, readdir, unlink, stat, mkdir } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { readFile, writeFile, readdir, unlink, stat, mkdir, rename, open } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { expandHome } from '../utils/paths.ts';
 import type { ScrapeResult } from '../core/scraper.ts';
@@ -25,6 +26,43 @@ export type CacheEntry = {
   cachedAt: number;
   result: ScrapeResult;
 };
+
+const pendingCacheOperations = new Map<string, Promise<void>>();
+
+// Serialize expiry and publication for one entry among callers in this process.
+export async function withCacheEntryLock<T>(cachePath: string, operation: () => Promise<T>): Promise<T> {
+  const file = path.resolve(expandHome(cachePath));
+  const previous = pendingCacheOperations.get(file) ?? Promise.resolve();
+  let release!: () => void;
+  const lock = new Promise<void>(resolve => { release = resolve; });
+  const pending = previous.then(() => lock);
+  pendingCacheOperations.set(file, pending);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (pendingCacheOperations.get(file) === pending) pendingCacheOperations.delete(file);
+  }
+}
+
+export async function readCacheEntry(cachePath: string): Promise<{ entry: CacheEntry; stats: Stats }> {
+  const file = await open(cachePath, 'r');
+  try {
+    const entry = JSON.parse(await file.readFile('utf8')) as CacheEntry;
+    return { entry, stats: await file.stat() };
+  } finally {
+    await file.close();
+  }
+}
+
+export async function removeCacheEntry(cachePath: string, observed: Stats): Promise<boolean> {
+  const current = await stat(cachePath);
+  if (current.dev !== observed.dev || current.ino !== observed.ino ||
+      current.mtimeMs !== observed.mtimeMs || current.size !== observed.size) return false;
+  await unlink(cachePath);
+  return true;
+}
 
 export function buildCacheKey(input: CacheKeyInput): string {
   return JSON.stringify({
@@ -57,27 +95,29 @@ export async function readCache(
   const hash = hashCacheKey(key);
   const cachePath = path.join(expandedDir, `${hash}.json`);
 
-  try {
-    const content = await readFile(cachePath, 'utf8');
-    const entry: CacheEntry = JSON.parse(content);
+  return withCacheEntryLock(cachePath, async () => {
+    try {
+      const { entry, stats } = await readCacheEntry(cachePath);
 
-    // Verify key matches to detect hash collision
-    if (entry.key !== key) {
-      // Hash collision - treat as cache miss
+      // Verify key matches to detect hash collision
+      if (entry.key !== key) {
+        // Hash collision - treat as cache miss
+        return null;
+      }
+
+      // Check TTL
+      const now = Date.now();
+      if (now - entry.cachedAt > ttl * 1000) {
+        await removeCacheEntry(cachePath, stats);
+        return null;
+      }
+
+      return entry.result;
+    } catch {
+      // File doesn't exist or is corrupt - cache miss
       return null;
     }
-
-    // Check TTL
-    const now = Date.now();
-    if (now - entry.cachedAt > ttl * 1000) {
-      return null;
-    }
-
-    return entry.result;
-  } catch {
-    // File doesn't exist or is corrupt - cache miss
-    return null;
-  }
+  });
 }
 
 export async function writeCache(
@@ -86,18 +126,25 @@ export async function writeCache(
   result: ScrapeResult,
 ): Promise<void> {
   const expandedDir = expandHome(cacheDir);
-  await mkdir(expandedDir, { recursive: true });
-
   const hash = hashCacheKey(key);
   const cachePath = path.join(expandedDir, `${hash}.json`);
+  return withCacheEntryLock(cachePath, async () => {
+    await mkdir(expandedDir, { recursive: true });
 
-  const entry: CacheEntry = {
-    key,
-    cachedAt: Date.now(),
-    result,
-  };
+    const entry: CacheEntry = {
+      key,
+      cachedAt: Date.now(),
+      result,
+    };
 
-  await writeFile(cachePath, JSON.stringify(entry, null, 2), 'utf8');
+    const temporaryPath = `${cachePath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, JSON.stringify(entry, null, 2), 'utf8');
+      await rename(temporaryPath, cachePath);
+    } finally {
+      await unlink(temporaryPath).catch(() => {});
+    }
+  });
 }
 
 export async function listCache(cacheDir: string): Promise<Array<{ hash: string; key: string; cachedAt: number; size: number }>> {
@@ -142,7 +189,6 @@ export async function clearCache(
   olderThan?: number,
 ): Promise<{ deleted: number; skipped: number }> {
   const expandedDir = expandHome(cacheDir);
-
   try {
     const entries = await readdir(expandedDir, { withFileTypes: true });
     let deleted = 0;
@@ -154,31 +200,27 @@ export async function clearCache(
         skipped++;
         continue;
       }
-
       const cachePath = path.join(expandedDir, entry.name);
-
-      if (olderThan) {
+      const removed = await withCacheEntryLock(cachePath, async () => {
         try {
-          const content = await readFile(cachePath, 'utf8');
-          const cacheEntry: CacheEntry = JSON.parse(content);
-
-          if (cacheEntry.cachedAt >= cutoff) {
-            skipped++;
-            continue;
+          if (olderThan) {
+            try {
+              const cached = await readCacheEntry(cachePath);
+              if (cached.entry.cachedAt >= cutoff) return false;
+              return await removeCacheEntry(cachePath, cached.stats);
+            } catch (error) {
+              if (!(error instanceof SyntaxError)) throw error;
+            }
           }
+          await unlink(cachePath);
+          return true;
         } catch {
-          // If we can't read it, delete it anyway
+          return false;
         }
-      }
-
-      try {
-        await unlink(cachePath);
-        deleted++;
-      } catch {
-        skipped++;
-      }
+      });
+      if (removed) deleted++;
+      else skipped++;
     }
-
     return { deleted, skipped };
   } catch {
     return { deleted: 0, skipped: 0 };

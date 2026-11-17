@@ -3,8 +3,10 @@ import type { Engine } from '../../core/engine.ts';
 import type { ShuvcrawlConfig } from '../../config/schema.ts';
 import { buildApi } from '../../api/routes.ts';
 import { handleCliError } from '../error-handler.ts';
+import { startCacheMaintenance } from '../../storage/cache-maintenance.ts';
+import { createLogger, type Logger } from '../../utils/logger.ts';
 
-export function registerServeCommand(program: Command, engine: Engine, config: ShuvcrawlConfig) {
+export function registerServeCommand(program: Command, engine: Engine, config: ShuvcrawlConfig, logger: Logger = createLogger(config.telemetry.logLevel)) {
   program
     .command('serve')
     .description('Start the REST API server')
@@ -17,6 +19,7 @@ export function registerServeCommand(program: Command, engine: Engine, config: S
         const host = options.host ?? config.api.host;
 
         const api = buildApi(engine, config);
+        startCacheMaintenance(config.cache, logger);
 
         const server = Bun.serve({
           port,

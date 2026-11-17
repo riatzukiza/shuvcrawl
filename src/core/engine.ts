@@ -39,12 +39,12 @@ export class Engine {
     }
   }
 
-  async scrape(url: string, options: ScrapeOptions = {}): Promise<{ result: ScrapeResult; output: Awaited<ReturnType<typeof writeScrapeOutput>> }> {
+  async scrape(url: string, options: ScrapeOptions = {}): Promise<{ result: ScrapeResult; output: Partial<Awaited<ReturnType<typeof writeScrapeOutput>>> }> {
     const telemetry = createTelemetryContext();
     const hostname = new URL(url).hostname;
     await this.rateLimiter.waitForDomain(hostname, this.config.crawl.delay);
     const result = await scrapeUrl(url, options, this.config, this.logger, telemetry, this.browserPool);
-    const output = await writeScrapeOutput(result, this.config);
+    const output = options.persistOutput === false ? {} : await writeScrapeOutput(result, this.config);
     return { result, output };
   }
 

@@ -108,7 +108,7 @@ registerScreenshotCommand(program, engine);
 registerPdfCommand(program, engine);
 registerConfigCommand(program, engine);
 registerVersionCommand(program);
-registerServeCommand(program, engine, config);
+registerServeCommand(program, engine, config, logger);
 registerCacheCommand(program, config);
 registerUpdateBpcCommand(program, config);
 

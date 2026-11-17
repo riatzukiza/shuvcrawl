@@ -24,6 +24,8 @@ export type ScrapeOptions = {
   mobile?: boolean;
   proxy?: string | null;
   debugArtifacts?: boolean;
+  artifacts?: boolean;
+  persistOutput?: boolean;
   // Wait strategies
   wait?: WaitStrategy;
   waitFor?: string;
@@ -197,7 +199,8 @@ export async function scrapeUrl(
   let renderElapsed = 0;
   let waitStrategy: WaitStrategy = 'load';
   let requestParentSpanId: string | undefined;
-  const artifactsDir = options.debugArtifacts || config.artifacts.enabled ? await ensureArtifactDir(config.artifacts.dir, telemetry.requestId) : null;
+  const artifactsEnabled = options.debugArtifacts || (config.artifacts.enabled && options.artifacts !== false);
+  const artifactsDir = artifactsEnabled ? await ensureArtifactDir(config.artifacts.dir, telemetry.requestId) : null;
 
   // Set up custom headers for fast path (convert to strings)
   const customHeaders = options.headers

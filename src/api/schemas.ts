@@ -11,6 +11,8 @@ export const ScrapeRequestSchema = z.object({
     mobile: z.boolean().optional(),
     proxy: z.string().nullable().optional(),
     debugArtifacts: z.boolean().optional(),
+    artifacts: z.boolean().optional(),
+    persistOutput: z.boolean().optional(),
     // Wait strategies
     wait: z.enum(['load', 'networkidle', 'selector', 'sleep']).optional(),
     waitFor: z.string().optional(),

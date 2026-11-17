@@ -165,6 +165,21 @@ curl -X POST http://localhost:3777/scrape \
 
 ## Configuration
 
+Batch API consumers can send `options.persistOutput: false` to skip per-domain
+JSON, Markdown and metadata files, and `options.artifacts: false` to skip routine
+diagnostic files. The response still contains Markdown, links and requested raw
+HTML, with `output: {}` when persistence is disabled. Existing API and CLI
+requests retain their output defaults. `debugArtifacts: true` explicitly enables
+diagnostics for an individual request.
+
+Expired response-cache entries are removed when read. API servers also reclaim
+up to 64 directory entries at startup and every 30 seconds, progressing through
+the cache without a full-directory scan on each request. Entries use the existing
+`SHUVCRAWL_CACHE_TTL` setting. Cache writes publish complete entries atomically,
+and expiry and refresh operations for each entry within a process are serialized.
+Cleanup skips recent files and checks file identity before unlinking an expired
+entry.
+
 Config file: `~/.shuvcrawl/config.json` (or `$SHUVCRAWL_CONFIG`, or `--config <path>`)
 
 All values can be overridden via environment variables: `SHUVCRAWL_{SECTION}_{KEY}`.
