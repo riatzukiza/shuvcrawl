@@ -1,0 +1,13 @@
+diff --git a/lib/server/chromium/crPage.js b/lib/server/chromium/crPage.js
+index ec3830cff301a639034f5617b9822b6a61109b5d..9a9943052e1b1d63b3abda719a569e6d4f47d954 100644
+--- a/lib/server/chromium/crPage.js
++++ b/lib/server/chromium/crPage.js
+@@ -369,6 +369,8 @@ class FrameSession {
+   }
+   async _initialize(hasUIWindow) {
+     const pageEnablePromise = this._client.send("Page.enable");
++    // The session can close during the next await, before Promise.all observes this rejection.
++    void pageEnablePromise.catch(() => {});
+     if (!this._page.isStorageStatePage && hasUIWindow && !this._crPage._browserContext._browser.isClank() && !this._crPage._browserContext._options.noDefaultViewport) {
+       const { windowId } = await this._client.send("Browser.getWindowForTarget");
+       this._windowId = windowId;
