@@ -1,7 +1,11 @@
 # Production Dockerfile for shuvcrawl
 # Based on the patchright-bpc spike findings
 
-FROM oven/bun:1.2 AS base
+FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS bun_runtime
+
+# Keep the Bookworm Chromium dependencies and use Bun's fixed extra-stdio pipe handling.
+FROM oven/bun:1.2.23@sha256:6ebf306367da43ad75c4d5119563e24de9b66372929ad4fa31546be053a16f74 AS base
+COPY --from=bun_runtime /usr/local/bin/bun /usr/local/bin/bun
 
 # Install Chromium system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
